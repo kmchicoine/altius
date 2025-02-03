@@ -34,7 +34,7 @@ fn handle_connection(mut stream: TcpStream, database: Arc<RwLock<Database>>) {
 
     let mut headers = [httparse::EMPTY_HEADER; 16];
     let mut req = httparse::Request::new(&mut headers);
-    let res = req.parse(&buffer).unwrap();
+    let res = req.parse(&buffer).expect("Request parse failure").unwrap();
 
     let mut content_length = 0;
     for header in req.headers {
@@ -42,13 +42,12 @@ fn handle_connection(mut stream: TcpStream, database: Arc<RwLock<Database>>) {
             content_length = std::str::from_utf8(header.value).unwrap().parse::<usize>().unwrap();
         }
     }
-    
-    let body = std::str::from_utf8(&buffer[res.unwrap()..content_length+res.unwrap()]).unwrap();
+    let body = std::str::from_utf8(&buffer[res..content_length+res]).expect("String parsing body failed");
 
     let (status_line, data) = match req.method {
-        Some("GET") => get(&req.path.unwrap(), database),
-        Some("PUT") => put(&req.path.unwrap(), &body, database),
-        _ => (String::from("HTTP/1.1 404 NOT FOUND"), String::from("oops.html"))
+        Some("GET") => get(&req.path.expect("Bad path"), database),
+        Some("PUT") => put(&req.path.expect("Bad path"), &body, database),
+        _ => (String::from("HTTP/1.1 404 NOT FOUND"), String::from("Request not supported"))
     };
 
     let length = data.len();
@@ -80,32 +79,28 @@ fn get(path: &str, database: Arc<RwLock<Database>>) -> (String,String) {
 
 fn put(path: &str, new_value: &str, database: Arc<RwLock<Database>>) -> (String, String) {
 
-    //assume key exists; update value
+    //assume key exists; update value (after dropping first character '/')
     if let Some(key) = path.chars().next().map(|c| &path[c.len_utf8()..]) {
-        if key.len() > 1 {
 
-            //acquire database lock; read-only because we're updating a mutex value
-            let map = database.read().expect("RwLock poisoned");
+        //acquire database lock; read-only because we're updating a mutex value
+        let map = database.read().expect("RwLock poisoned");
 
-            if let Some(value) = map.get(key) {
-                
-                let mut value = value.write().expect("Mutex poisoned");
-                *value = String::from(new_value);
-
-                return (String::from("HTTP/1.1 OK"), String::from(format!("{key} updated with {value}\n")))
-            } 
-
-            //key does not exist; create new entry
-            drop(map);
+        if let Some(value) = map.get(key) {
             
-            let mut map = database.write().expect("RwLock poisoned");
-            map.entry(String::from(key)).or_insert_with(|| RwLock::new(String::from(new_value)));
+            let mut value = value.write().expect("Mutex poisoned");
+            *value = String::from(new_value);
 
-            return (String::from("HTTP/1.1 200 OK"), String::from(format!("{key}:{new_value} put success\n")))
+            return (String::from("HTTP/1.1 OK"), String::from(format!("{key} updated with {value}\n")))
+        } 
 
-        } else {
-            return (String::from("HTTP/1.1 400 BAD REQUEST"), String::from(format!("destination not specified\n")))
-        }
+        //key does not exist; create new entry
+        drop(map);
+        
+        let mut map = database.write().expect("RwLock poisoned");
+        map.entry(String::from(key)).or_insert_with(|| RwLock::new(String::from(new_value)));
+
+        return (String::from("HTTP/1.1 200 OK"), String::from(format!("{key}:{new_value} put success\n")))
+
     } else {
         return (String::from("HTTP/1.1 400 BAD REQUEST"), String::from(format!("destination not specified\n")))
     }    
