@@ -1,8 +1,8 @@
 use std::{
-    sync::{mpsc, Arc, Mutex},
-    thread,
     collections::HashMap,
     sync::RwLock,
+    sync::{mpsc, Arc, Mutex},
+    thread,
 };
 
 pub struct ThreadPool {
@@ -11,7 +11,6 @@ pub struct ThreadPool {
 }
 
 type Job = Box<dyn FnOnce() + Send + 'static>;
-
 
 impl ThreadPool {
     pub fn new(size: usize) -> ThreadPool {
@@ -88,4 +87,3 @@ impl Worker {
 }
 
 pub type Database = HashMap<String, RwLock<String>>;
-
